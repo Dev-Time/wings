@@ -14,6 +14,7 @@ import (
 	"github.com/apex/log"
 	"github.com/gammazero/workerpool"
 	"github.com/goccy/go-json"
+	"github.com/pterodactyl/wings/environment/kubernetes"
 
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
@@ -26,13 +27,15 @@ type Manager struct {
 	mu      sync.RWMutex
 	client  remote.Client
 	servers []*Server
+	envType string
 }
 
 // NewManager returns a new server manager instance. This will boot up all the
 // servers that are currently present on the filesystem and set them into the
 // manager.
-func NewManager(ctx context.Context, client remote.Client) (*Manager, error) {
+func NewManager(ctx context.Context, client remote.Client, env string) (*Manager, error) {
 	m := NewEmptyManager(client)
+	m.envType = env
 	if err := m.init(ctx); err != nil {
 		return nil, err
 	}
@@ -209,15 +212,30 @@ func (m *Manager) InitServer(data remote.ServerConfigurationResponse) (*Server, 
 	}
 
 	envCfg := environment.NewConfiguration(settings, s.GetEnvironmentVariables())
-	meta := docker.Metadata{
-		Image: s.Config().Container.Image,
-	}
 
-	if env, err := docker.New(s.ID(), &meta, envCfg); err != nil {
-		return nil, err
-	} else {
-		s.Environment = env
-		s.StartEventListeners()
+	switch m.envType {
+	case "docker":
+		meta := docker.Metadata{
+			Image: s.Config().Container.Image,
+		}
+
+		if env, err := docker.New(s.ID(), &meta, envCfg); err != nil {
+			return nil, err
+		} else {
+			s.Environment = env
+			s.StartEventListeners()
+		}
+	case "kubernetes":
+		meta := kubernetes.Metadata{
+			Image: s.Config().Container.Image,
+		}
+
+		if env, err := kubernetes.New(s.ID(), &meta, envCfg); err != nil {
+			return nil, err
+		} else {
+			s.Environment = env
+			s.StartEventListeners()
+		}
 	}
 
 	// If the server's data directory exists, force disk usage calculation.

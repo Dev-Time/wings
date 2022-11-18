@@ -84,6 +84,7 @@ func init() {
 	rootCommand.Flags().Bool("auto-tls", false, "pass in order to have wings generate and manage its own SSL certificates using Let's Encrypt")
 	rootCommand.Flags().String("tls-hostname", "", "required with --auto-tls, the FQDN for the generated SSL certificate")
 	rootCommand.Flags().Bool("ignore-certificate-errors", false, "ignore certificate verification errors when executing API calls")
+	rootCommand.Flags().String("environment", "docker", "environment used for servers (docker (default) or kubernetes)")
 
 	rootCommand.AddCommand(versionCommand)
 	rootCommand.AddCommand(configureCmd)
@@ -135,13 +136,24 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		log.WithField("error", err).Fatal("failed to initialize database")
 	}
 
-	manager, err := server.NewManager(cmd.Context(), pclient)
+	env, _ := cmd.Flags().GetString("environment")
+
+	manager, err := server.NewManager(cmd.Context(), pclient, env)
 	if err != nil {
 		log.WithField("error", err).Fatal("failed to load server configurations")
 	}
 
-	if err := environment.ConfigureDocker(cmd.Context()); err != nil {
-		log.WithField("error", err).Fatal("failed to configure docker environment")
+	switch env {
+	case "docker":
+		if err := environment.ConfigureDocker(cmd.Context()); err != nil {
+			log.WithField("error", err).Fatal("failed to configure docker environment")
+		}
+	case "kubernetes":
+		if err := environment.ConfigureKubernetes(cmd.Context()); err != nil {
+			log.WithField("error", err).Fatal("failed to configure kubernetes environment")
+		}
+	default:
+		log.Fatal("unknown environment type")
 	}
 
 	if err := config.WriteToDisk(config.Get()); err != nil {

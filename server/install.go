@@ -101,7 +101,7 @@ func (s *Server) internalInstall() error {
 	if err != nil {
 		return err
 	}
-	p, err := NewInstallationProcess(s, &script)
+	p, err := NewDockerInstallationProcess(s, &script)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (s *Server) internalInstall() error {
 	return nil
 }
 
-type InstallationProcess struct {
+type DockerInstallationProcess struct {
 	Server *Server
 	Script *remote.InstallationScript
 	client *client.Client
@@ -124,8 +124,8 @@ type InstallationProcess struct {
 // NewInstallationProcess returns a new installation process struct that will be
 // used to create containers and otherwise perform installation commands for a
 // server.
-func NewInstallationProcess(s *Server, script *remote.InstallationScript) (*InstallationProcess, error) {
-	proc := &InstallationProcess{
+func NewDockerInstallationProcess(s *Server, script *remote.InstallationScript) (*DockerInstallationProcess, error) {
+	proc := &DockerInstallationProcess{
 		Script: script,
 		Server: s,
 	}
@@ -162,7 +162,7 @@ func (s *Server) SetRestoring(state bool) {
 }
 
 // RemoveContainer removes the installation container for the server.
-func (ip *InstallationProcess) RemoveContainer() error {
+func (ip *DockerInstallationProcess) RemoveContainer() error {
 	err := ip.client.ContainerRemove(ip.Server.Context(), ip.Server.ID()+"_installer", types.ContainerRemoveOptions{
 		RemoveVolumes: true,
 		Force:         true,
@@ -177,7 +177,7 @@ func (ip *InstallationProcess) RemoveContainer() error {
 // This will configure the required environment, and then spin up the
 // installation container. Once the container finishes installing the results
 // are stored in an installation log in the server's configuration directory.
-func (ip *InstallationProcess) Run() error {
+func (ip *DockerInstallationProcess) Run() error {
 	ip.Server.Log().Debug("acquiring installation process lock")
 	if !ip.Server.installing.SwapIf(true) {
 		return errors.New("install: cannot obtain installation lock")
@@ -211,13 +211,13 @@ func (ip *InstallationProcess) Run() error {
 }
 
 // Returns the location of the temporary data for the installation process.
-func (ip *InstallationProcess) tempDir() string {
+func (ip *DockerInstallationProcess) tempDir() string {
 	return filepath.Join(config.Get().System.TmpDirectory, ip.Server.ID())
 }
 
 // Writes the installation script to a temporary file on the host machine so that it
 // can be properly mounted into the installation container and then executed.
-func (ip *InstallationProcess) writeScriptToDisk() error {
+func (ip *DockerInstallationProcess) writeScriptToDisk() error {
 	// Make sure the temp directory root exists before trying to make a directory within it. The
 	// ioutil.TempDir call expects this base to exist, it won't create it for you.
 	if err := os.MkdirAll(ip.tempDir(), 0o700); err != nil {
@@ -247,7 +247,7 @@ func (ip *InstallationProcess) writeScriptToDisk() error {
 }
 
 // Pulls the docker image to be used for the installation container.
-func (ip *InstallationProcess) pullInstallationImage() error {
+func (ip *DockerInstallationProcess) pullInstallationImage() error {
 	// Get a registry auth configuration from the config.
 	var registryAuth *config.RegistryConfiguration
 	for registry, c := range config.Get().Docker.Registries {
@@ -321,7 +321,7 @@ func (ip *InstallationProcess) pullInstallationImage() error {
 // required docker container image as well as writes the installation script to
 // the disk. This process is executed in an async manner, if either one fails
 // the error is returned.
-func (ip *InstallationProcess) BeforeExecute() error {
+func (ip *DockerInstallationProcess) BeforeExecute() error {
 	if err := ip.writeScriptToDisk(); err != nil {
 		return errors.WithMessage(err, "failed to write installation script to disk")
 	}
@@ -335,14 +335,14 @@ func (ip *InstallationProcess) BeforeExecute() error {
 }
 
 // GetLogPath returns the log path for the installation process.
-func (ip *InstallationProcess) GetLogPath() string {
+func (ip *DockerInstallationProcess) GetLogPath() string {
 	return filepath.Join(config.Get().System.LogDirectory, "/install", ip.Server.ID()+".log")
 }
 
 // AfterExecute cleans up after the execution of the installation process.
 // This grabs the logs from the process to store in the server configuration
 // directory, and then destroys the associated installation container.
-func (ip *InstallationProcess) AfterExecute(containerId string) error {
+func (ip *DockerInstallationProcess) AfterExecute(containerId string) error {
 	defer ip.RemoveContainer()
 
 	ip.Server.Log().WithField("container_id", containerId).Debug("pulling installation logs for server")
@@ -403,7 +403,7 @@ func (ip *InstallationProcess) AfterExecute(containerId string) error {
 
 // Execute executes the installation process inside a specially created docker
 // container.
-func (ip *InstallationProcess) Execute() (string, error) {
+func (ip *DockerInstallationProcess) Execute() (string, error) {
 	// Create a child context that is canceled once this function is done running. This
 	// will also be canceled if the parent context (from the Server struct) is canceled
 	// which occurs if the server is deleted.
@@ -516,7 +516,7 @@ func (ip *InstallationProcess) Execute() (string, error) {
 // StreamOutput streams the output of the installation process to a log file in
 // the server configuration directory, as well as to a websocket listener so
 // that the process can be viewed in the panel by administrators.
-func (ip *InstallationProcess) StreamOutput(ctx context.Context, id string) error {
+func (ip *DockerInstallationProcess) StreamOutput(ctx context.Context, id string) error {
 	opts := types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
 	reader, err := ip.client.ContainerLogs(ctx, id, opts)
 	if err != nil {
@@ -540,7 +540,7 @@ func (ip *InstallationProcess) StreamOutput(ctx context.Context, id string) erro
 // This also avoids a server with limits such as 4GB of memory from accidentally
 // consuming 2-5x the defined limits during the install process and causing
 // system instability.
-func (ip *InstallationProcess) resourceLimits() container.Resources {
+func (ip *DockerInstallationProcess) resourceLimits() container.Resources {
 	limits := config.Get().Docker.InstallerLimits
 
 	// Create a copy of the configuration, so we're not accidentally making
